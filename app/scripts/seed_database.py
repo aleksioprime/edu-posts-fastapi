@@ -25,24 +25,27 @@ from src.models.user import User
 from src.services.image_storage import POST_IMAGE_MAX_BYTES, PostImageStorage
 
 
-PICSUM_IMAGE_URL = "https://picsum.photos/seed/{seed}/1200/800"
-JSONPLACEHOLDER_POSTS_URL = "https://jsonplaceholder.typicode.com/posts"
+PICSUM_SEEDED_IMAGE_URL = "https://picsum.photos/seed/{seed}/1200/800"
+PICSUM_IMAGE_BY_ID_URL = "https://picsum.photos/id/{image_id}/1200/800"
+PICSUM_LIST_URL = "https://picsum.photos/v2/list?page=1&limit=100"
 EXTERNAL_REQUEST_TIMEOUT = 15
-TEXT_DOWNLOAD_MAX_BYTES = 1024 * 1024
+METADATA_DOWNLOAD_MAX_BYTES = 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
 class PostTemplate:
-    """Заголовок и содержимое тестового поста."""
+    """Текст тестового поста и связанное изображение."""
 
     title: str
     content: str
+    image_url: str | None = None
 
 
-def download_random_image(seed: str) -> bytes:
-    """Загружает воспроизводимое случайное изображение из Lorem Picsum."""
+def download_random_image(url: str) -> bytes:
+    """Загружает изображение по подготовленному URL Lorem Picsum."""
 
-    url = PICSUM_IMAGE_URL.format(seed=quote(seed, safe=""))
+    if not url.startswith("https://picsum.photos/"):
+        raise RuntimeError("Разрешена загрузка изображений только из Lorem Picsum")
     request = Request(url, headers={"User-Agent": "edu-posts-seed/1.0"})
     try:
         with urlopen(request, timeout=EXTERNAL_REQUEST_TIMEOUT) as response:
@@ -58,46 +61,62 @@ def download_random_image(seed: str) -> bytes:
 
 
 def download_post_templates() -> list[PostTemplate]:
-    """Загружает шаблоны постов из JSONPlaceholder одним запросом."""
+    """Создаёт шаблоны постов из метаданных Lorem Picsum."""
 
     request = Request(
-        JSONPLACEHOLDER_POSTS_URL,
+        PICSUM_LIST_URL,
         headers={"User-Agent": "edu-posts-seed/1.0"},
     )
     try:
         with urlopen(request, timeout=EXTERNAL_REQUEST_TIMEOUT) as response:
-            content = response.read(TEXT_DOWNLOAD_MAX_BYTES + 1)
+            content = response.read(METADATA_DOWNLOAD_MAX_BYTES + 1)
     except OSError as exc:
-        raise RuntimeError("Не удалось загрузить тексты из JSONPlaceholder") from exc
+        raise RuntimeError("Не удалось загрузить метаданные Lorem Picsum") from exc
 
-    if len(content) > TEXT_DOWNLOAD_MAX_BYTES:
-        raise RuntimeError("Ответ JSONPlaceholder превышает допустимый 1 МБ")
+    if len(content) > METADATA_DOWNLOAD_MAX_BYTES:
+        raise RuntimeError("Ответ Lorem Picsum превышает допустимый 1 МБ")
 
     try:
         payload = json.loads(content)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise RuntimeError("JSONPlaceholder вернул некорректный JSON") from exc
+        raise RuntimeError("Lorem Picsum вернул некорректный JSON") from exc
 
     if not isinstance(payload, list):
-        raise RuntimeError("JSONPlaceholder вернул неожиданный формат данных")
+        raise RuntimeError("Lorem Picsum вернул неожиданный формат данных")
 
     templates = []
     for item in payload:
         if not isinstance(item, dict):
             continue
-        title = item.get("title")
-        body = item.get("body")
-        if isinstance(title, str) and title.strip() and isinstance(body, str) and body.strip():
-            normalized_title = title.strip()
-            templates.append(
-                PostTemplate(
-                    title=(normalized_title[:1].upper() + normalized_title[1:])[:200],
-                    content=body.strip(),
-                )
+        image_id = str(item.get("id", "")).strip()
+        author = str(item.get("author", "")).strip()[:120]
+        source_url = str(item.get("url", "")).strip()
+        try:
+            width = int(item["width"])
+            height = int(item["height"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not image_id or not author or width <= 0 or height <= 0:
+            continue
+        if not source_url.startswith("https://"):
+            continue
+
+        templates.append(
+            PostTemplate(
+                title=f"Фотография #{image_id} — {author}"[:200],
+                content=(
+                    f"Фотография автора {author}. "
+                    f"Размер оригинала: {width} × {height}. "
+                    f"Источник: {source_url}"
+                ),
+                image_url=PICSUM_IMAGE_BY_ID_URL.format(
+                    image_id=quote(image_id, safe=""),
+                ),
             )
+        )
 
     if not templates:
-        raise RuntimeError("JSONPlaceholder не вернул подходящих текстов")
+        raise RuntimeError("Lorem Picsum не вернул подходящих метаданных")
     return templates
 
 
@@ -191,7 +210,10 @@ async def seed_database(
                     await session.flush()
 
                     if add_images and storage is not None:
-                        content = await asyncio.to_thread(image_loader, str(post.id))
+                        image_url = template.image_url or PICSUM_SEEDED_IMAGE_URL.format(
+                            seed=quote(str(post.id), safe=""),
+                        )
+                        content = await asyncio.to_thread(image_loader, image_url)
                         upload = UploadFile(file=BytesIO(content), filename=f"{post.id}.jpg")
                         try:
                             post.image_url = await storage.save(post.id, upload)
@@ -230,7 +252,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--local-text",
         action="store_true",
-        help="Создать русские тестовые тексты без обращения к JSONPlaceholder.",
+        help="Создать встроенные русские тексты без загрузки метаданных Lorem Picsum.",
     )
     args = parser.parse_args()
 

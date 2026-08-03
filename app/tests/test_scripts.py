@@ -20,25 +20,44 @@ def make_test_image(_: str) -> bytes:
 
 
 def make_test_templates() -> list[PostTemplate]:
-    """Возвращает предсказуемые тексты без обращения к внешнему API."""
+    """Возвращает предсказуемые метаданные без обращения к внешнему API."""
 
     return [
-        PostTemplate(title=f"Заголовок {number}", content=f"Содержимое {number}")
+        PostTemplate(
+            title=f"Фотография #{number} — Автор {number}",
+            content=(
+                f"Фотография автора Автор {number}. "
+                "Размер оригинала: 1200 × 800. "
+                f"Источник: https://example.com/photo/{number}"
+            ),
+            image_url=f"https://picsum.photos/id/{number}/1200/800",
+        )
         for number in range(1, 101)
     ]
 
 
 def test_download_post_templates_validates_and_normalizes_response(monkeypatch):
-    """Проверяет преобразование ответа JSONPlaceholder в шаблоны."""
+    """Проверяет преобразование метаданных Lorem Picsum в шаблоны."""
 
-    response = BytesIO(b'[{"title": " first title ", "body": "Post body"}]')
+    response = BytesIO(
+        b'[{"id":"42","author":"Photo Author","width":1200,'
+        b'"height":800,"url":"https://example.com/photo/42"}]'
+    )
     monkeypatch.setattr(
         "scripts.seed_database.urlopen",
         lambda request, timeout: response,
     )
 
     assert download_post_templates() == [
-        PostTemplate(title="First title", content="Post body")
+        PostTemplate(
+            title="Фотография #42 — Photo Author",
+            content=(
+                "Фотография автора Photo Author. "
+                "Размер оригинала: 1200 × 800. "
+                "Источник: https://example.com/photo/42"
+            ),
+            image_url="https://picsum.photos/id/42/1200/800",
+        )
     ]
 
 
@@ -74,9 +93,12 @@ async def test_seed_is_idempotent_and_clear_removes_data(test_session_maker, tmp
         assert await session.scalar(
             select(func.count()).select_from(Post).where(Post.image_url.is_not(None))
         ) == 4
-        first_post = await session.scalar(select(Post).where(Post.title == "Заголовок 1"))
+        first_post = await session.scalar(
+            select(Post).where(Post.title == "Фотография #1 — Автор 1")
+        )
         assert first_post is not None
-        assert first_post.content == "Содержимое 1"
+        assert "Размер оригинала: 1200 × 800" in first_post.content
+        assert "https://example.com/photo/1" in first_post.content
 
     assert await clear_database(
         session_factory=test_session_maker,
