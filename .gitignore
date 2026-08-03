@@ -1,0 +1,56 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Tests, coverage and linters
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.mypy_cache/
+.pyright/
+.ruff_cache/
+
+# Packaging and build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+pip-wheel-metadata/
+
+# Local databases and runtime data
+*.db
+*.sqlite
+*.sqlite3
+postgres_data/
+
+# Logs and temporary files
+*.log
+*.pid
+*.tmp
+*.swp
+*~
+
+# IDE and operating system files
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
