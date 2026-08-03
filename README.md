@@ -35,6 +35,28 @@ docker compose -p edu-posts up --build -d
 docker compose -p edu-posts exec api python scripts/create_superuser.py admin admin@example.com U9Utwt
 ```
 
+### Служебные скрипты базы данных
+
+Очистка удаляет всех пользователей и все посты, но сохраняет структуру таблиц и состояние
+миграций Alembic. Операция необратима и требует явного флага `--yes`:
+
+```bash
+docker compose -p edu-posts exec api python scripts/clear_database.py --yes
+```
+
+Заполнение создаёт пользователей `demo1`, `demo2`, … и тестовые посты. Повторный запуск
+не дублирует уже созданные записи:
+
+```bash
+docker compose -p edu-posts exec api python scripts/seed_database.py \
+  --users 3 \
+  --posts-per-user 3 \
+  --password 'replace-with-demo-password'
+```
+
+После очистки суперпользователь также удаляется, поэтому при необходимости создайте его
+заново. Не используйте пароль тестовых пользователей для реальных аккаунтов.
+
 ## Локальный запуск
 
 По умолчанию без `.env` используется SQLite, поэтому PostgreSQL для быстрого знакомства
@@ -212,6 +234,17 @@ cd ~/edu-posts
 docker compose -p edu-posts -f docker-compose.prod.yml ps
 docker compose -p edu-posts -f docker-compose.prod.yml logs --tail=100 api
 docker compose -p edu-posts -f docker-compose.prod.yml logs --tail=100 postgres
+```
+
+Служебные скрипты на сервере запускаются из каталога деплоя через production compose:
+
+```bash
+cd ~/edu-posts
+docker compose -p edu-posts -f docker-compose.prod.yml exec api \
+  python scripts/clear_database.py --yes
+docker compose -p edu-posts -f docker-compose.prod.yml exec api \
+  python scripts/seed_database.py --users 3 --posts-per-user 3 \
+  --password 'replace-with-demo-password'
 ```
 
 Данные PostgreSQL сохраняются в named volume `edu-posts_postgres_data` и не удаляются при

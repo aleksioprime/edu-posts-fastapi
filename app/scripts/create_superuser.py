@@ -1,5 +1,12 @@
 import argparse
 import asyncio
+import sys
+from pathlib import Path
+
+# Позволяет одинаково запускать скрипт как модуль и как файл из корня приложения.
+project_root = Path(__file__).resolve().parents[1]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 from sqlalchemy import or_, select
 
@@ -7,8 +14,13 @@ from src.core.database import async_session_maker
 from src.models.user import User
 
 
-async def create_superuser(username: str, email: str, password: str) -> None:
-    async with async_session_maker() as session:
+async def create_superuser(
+    username: str,
+    email: str,
+    password: str,
+    session_factory=async_session_maker,
+) -> None:
+    async with session_factory() as session:
         exists = await session.scalar(
             select(User).where(or_(User.username == username, User.email == email.lower()))
         )
