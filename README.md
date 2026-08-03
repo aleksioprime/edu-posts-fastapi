@@ -19,7 +19,7 @@
 
 ```bash
 cp .env.example .env
-docker compose up --build
+docker compose -p edu-posts up --build -d
 ```
 
 После запуска доступны:
@@ -32,7 +32,7 @@ docker compose up --build
 Создание администратора в запущенном контейнере:
 
 ```bash
-docker compose exec api python scripts/create_superuser.py admin admin@example.com strong-password
+docker compose -p edu-posts exec api python scripts/create_superuser.py admin admin@example.com U9Utwt
 ```
 
 ## Локальный запуск
@@ -71,3 +71,149 @@ pytest
 Для защищённых запросов передавайте заголовок `Authorization: Bearer <token>` либо
 используйте кнопку **Authorize** в Swagger UI.
 
+## Production deployment
+
+Workflow `.github/workflows/deploy.yml` запускается при push в `main` или вручную через
+GitHub Actions. Он выполняет тесты, публикует Docker image в GHCR и обновляет приложение
+в `~/edu-posts` на сервере.
+
+### Подготовка сервера
+
+Ниже приведён вариант для чистого сервера Ubuntu 22.04/24.04 с архитектурой `amd64`.
+Workflow собирает образ для `linux/amd64`; для ARM-сервера измените параметр `platforms`
+в workflow на `linux/arm64`. Команды установки основаны на официальных инструкциях
+[Docker Engine для Ubuntu](https://docs.docker.com/engine/install/ubuntu/) и
+[Docker Compose plugin](https://docs.docker.com/compose/install/linux/). Настройка доступа
+без `sudo` описана в официальных
+[post-installation steps](https://docs.docker.com/engine/install/linux-postinstall/).
+
+1. Удалите потенциально конфликтующие пакеты, затем установите Docker Engine и Compose
+plugin из официального репозитория Docker:
+
+```bash
+sudo apt remove docker.io docker-compose docker-compose-v2 docker-doc docker-buildx podman-docker containerd runc
+
+sudo apt update
+sudo apt install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io \
+  docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now docker containerd
+
+sudo docker run --rm hello-world
+sudo docker compose version
+```
+
+Если конфликтующие пакеты не были установлены, `apt` может сообщить, что удалять нечего —
+это нормально. Устанавливается Compose plugin, поэтому используется современная команда
+`docker compose`, а не отдельная устаревшая команда `docker-compose`.
+
+2. Создайте отдельного пользователя для деплоя и дайте ему доступ к Docker:
+
+```bash
+sudo adduser --disabled-password --gecos "" deploy
+sudo usermod -aG docker deploy
+sudo -u deploy mkdir -p /home/deploy/edu-posts
+```
+
+Членство в группе `docker` фактически даёт root-права на сервере. Используйте отдельного
+пользователя и отдельный SSH-ключ только для CI/CD.
+
+3. На локальной машине создайте ключ для GitHub Actions:
+
+```bash
+ssh-keygen -t ed25519 -C "github-actions-edu-posts" -f ./edu-posts-deploy
+```
+
+Содержимое `edu-posts-deploy` сохраните в GitHub secret `SERVER_SSH_KEY`. Публичную часть
+`edu-posts-deploy.pub` добавьте на сервере в `/home/deploy/.ssh/authorized_keys`:
+
+Сначала на локальной машине выведите публичный ключ и скопируйте всю строку, начинающуюся
+с `ssh-ed25519`:
+
+```bash
+cat ./edu-posts-deploy.pub
+```
+
+Затем на сервере откройте файл:
+
+```bash
+sudo install -d -m 700 -o deploy -g deploy /home/deploy/.ssh
+sudoedit /home/deploy/.ssh/authorized_keys
+```
+Вставьте в него скопированную строку публичного ключа и сохраните файл. Не вставляйте приватный файл `edu-posts-deploy`.
+После сохранения выполните:
+
+```bash
+sudo chown deploy:deploy /home/deploy/.ssh/authorized_keys
+sudo chmod 600 /home/deploy/.ssh/authorized_keys
+sudo wc -l /home/deploy/.ssh/authorized_keys
+```
+
+Последняя команда должна показать как минимум одну строку.
+
+После добавления ключа проверьте вход и доступ к Docker с локальной машины:
+
+```bash
+ssh -p 22 -i ./edu-posts-deploy deploy@SERVER_HOST
+docker version
+docker compose version
+```
+
+4. Разрешите входящий SSH-трафик. Если API должен быть доступен напрямую, разрешите также
+порт из `APP_PORT`. Для production предпочтительнее оставить API за Nginx/Caddy и открыть
+наружу только `80/443`. Учитывайте, что опубликованные Docker-порты могут обходить правила
+UFW; ограничения следует также настроить в firewall облачного провайдера или цепочке
+`DOCKER-USER`.
+
+Серверу нужен исходящий HTTPS-доступ к `ghcr.io`, чтобы скачивать собранный образ.
+
+### Настройка GitHub
+
+В GitHub Environment с именем `production` необходимо создать секреты:
+
+- `SERVER_HOST` — адрес сервера;
+- `SERVER_PORT` — SSH-порт, обычно `22`;
+- `SERVER_USER` — пользователь с доступом к Docker;
+- `SERVER_SSH_KEY` — приватный SSH-ключ;
+- `PRODUCTION_ENV` — содержимое production-файла `.env` без `APP_IMAGE` и `IMAGE_TAG`.
+
+Для описанной выше конфигурации `SERVER_USER` должен быть равен `deploy`. Минимальное
+содержимое `PRODUCTION_ENV` можно взять из `.env.example`. Секретные значения для
+`JWT_SECRET_KEY` и `ADMIN_SESSION_SECRET` можно получить отдельными запусками:
+
+```bash
+openssl rand -hex 32
+```
+
+В `PRODUCTION_ENV` не следует переносить `APP_IMAGE` и `IMAGE_TAG`: workflow добавляет
+имя образа и SHA-тег автоматически перед загрузкой `.env` на сервер.
+
+### Первый деплой и диагностика
+
+Запустите workflow `Build and deploy` вручную через вкладку Actions или отправьте commit
+в ветку `main`. После завершения проверьте состояние на сервере:
+
+```bash
+cd ~/edu-posts
+docker compose -p edu-posts -f docker-compose.prod.yml ps
+docker compose -p edu-posts -f docker-compose.prod.yml logs --tail=100 api
+docker compose -p edu-posts -f docker-compose.prod.yml logs --tail=100 postgres
+```
+
+Данные PostgreSQL сохраняются в named volume `edu-posts_postgres_data` и не удаляются при
+обычном обновлении контейнеров. Для production необходимо отдельно настроить резервное
+копирование этого volume или самой базы данных.

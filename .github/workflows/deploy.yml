@@ -1,0 +1,145 @@
+name: Build and deploy
+
+run-name: "Deploy ${{ github.ref_name }} by ${{ github.actor }}"
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "app/**"
+      - "docker-compose.prod.yml"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            app/requirements.txt
+            app/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: app
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        working-directory: app
+        run: pytest -q
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.image.outputs.name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Prepare image name
+        id: image
+        shell: bash
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./app
+          file: ./app/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:latest
+            ${{ steps.image.outputs.name }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SERVER_HOST: ${{ secrets.SERVER_HOST }}
+      SERVER_PORT: ${{ secrets.SERVER_PORT }}
+      SERVER_USER: ${{ secrets.SERVER_USER }}
+      SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+      PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
+      GHCR_TOKEN: ${{ github.token }}
+      GHCR_USER: ${{ github.actor }}
+      APP_IMAGE: ${{ needs.build.outputs.image }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Prepare deployment files
+        shell: bash
+        run: |
+          printf '%s\n' "$PRODUCTION_ENV" > deploy.env
+          printf '\nAPP_IMAGE=%s\nIMAGE_TAG=%s\n' "$APP_IMAGE" "$GITHUB_SHA" >> deploy.env
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SERVER_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$SERVER_PORT" -H "$SERVER_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload deployment files
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" \
+            'mkdir -p ~/edu-posts'
+          scp -i ~/.ssh/deploy_key -P "$SERVER_PORT" \
+            docker-compose.prod.yml "$SERVER_USER@$SERVER_HOST:edu-posts/docker-compose.prod.yml"
+          scp -i ~/.ssh/deploy_key -P "$SERVER_PORT" \
+            deploy.env "$SERVER_USER@$SERVER_HOST:edu-posts/.env"
+
+      - name: Log in to GHCR on server
+        shell: bash
+        run: |
+          printf '%s' "$GHCR_TOKEN" | ssh -i ~/.ssh/deploy_key -p "$SERVER_PORT" \
+            "$SERVER_USER@$SERVER_HOST" "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+
+      - name: Deploy application
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" <<'EOF'
+            set -eu
+            cd ~/edu-posts
+            docker compose -p edu-posts -f docker-compose.prod.yml pull
+            docker compose -p edu-posts -f docker-compose.prod.yml \
+              up -d --remove-orphans --wait --wait-timeout 120
+            docker image prune -f
+            docker compose -p edu-posts -f docker-compose.prod.yml ps
+          EOF

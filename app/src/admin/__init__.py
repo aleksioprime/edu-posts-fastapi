@@ -12,10 +12,9 @@ def setup_admin(app: FastAPI) -> Admin:
         app,
         session_maker=async_session_maker,
         base_url="/admin",
-        title="Edu Posts — администрирование",
+        title="Администрирование",
         authentication_backend=AdminAuth(secret_key=settings.admin_session_secret),
     )
     admin.add_view(UserAdmin)
     admin.add_view(PostAdmin)
     return admin
-
