@@ -1,4 +1,5 @@
-"""Create users and posts tables."""
+"""Создание таблиц пользователей и постов."""
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -10,6 +11,8 @@ depends_on = None
 
 
 def upgrade() -> None:
+    """Создаёт исходную структуру базы данных."""
+
     op.create_table(
         "users",
         sa.Column("id", sa.Uuid(), nullable=False),
@@ -41,6 +44,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Удаляет исходную структуру базы данных."""
+
     op.drop_table("posts")
     op.drop_table("users")
-

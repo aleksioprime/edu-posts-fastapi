@@ -1,3 +1,5 @@
+"""Команда создания суперпользователя."""
+
 import argparse
 import asyncio
 import sys
@@ -20,6 +22,8 @@ async def create_superuser(
     password: str,
     session_factory=async_session_maker,
 ) -> None:
+    """Создаёт суперпользователя с уникальными логином и email."""
+
     async with session_factory() as session:
         exists = await session.scalar(
             select(User).where(or_(User.username == username, User.email == email.lower()))
@@ -40,4 +44,3 @@ if __name__ == "__main__":
     parser.add_argument("password")
     args = parser.parse_args()
     asyncio.run(create_superuser(args.username, args.email, args.password))
-

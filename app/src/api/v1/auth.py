@@ -1,3 +1,5 @@
+"""HTTP-эндпоинты регистрации и авторизации."""
+
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, status
@@ -13,6 +15,8 @@ router = APIRouter()
 
 @router.post("/register", response_model=UserMe, status_code=status.HTTP_201_CREATED)
 async def register(data: UserCreate, service: AuthService = Depends(get_auth_service)):
+    """Регистрирует нового пользователя."""
+
     return await service.register(data)
 
 
@@ -24,4 +28,3 @@ async def login(
 ):
     """OAuth2-совместимый вход. В поле username можно передать логин или email."""
     return await service.login(username, password)
-

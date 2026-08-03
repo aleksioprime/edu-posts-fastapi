@@ -22,9 +22,11 @@ services:
       - "8000:8000"
     volumes:
       - ./app:/usr/src/app
+      - media_data:/usr/src/app/media
     depends_on:
       postgres:
         condition: service_healthy
 
 volumes:
   postgres_data:
+  media_data:

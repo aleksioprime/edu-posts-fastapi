@@ -1,3 +1,5 @@
+"""Команда удаления прикладных данных и изображений."""
+
 import argparse
 import asyncio
 import sys
@@ -12,9 +14,13 @@ from sqlalchemy import delete, func, select
 from src.core.database import async_session_maker
 from src.models.post import Post
 from src.models.user import User
+from src.services.image_storage import PostImageStorage
 
 
-async def clear_database(session_factory=async_session_maker) -> tuple[int, int]:
+async def clear_database(
+    session_factory=async_session_maker,
+    image_storage: PostImageStorage | None = None,
+) -> tuple[int, int, int]:
     """Удаляет прикладные данные, сохраняя таблицы и версию Alembic."""
     async with session_factory() as session:
         post_count = await session.scalar(select(func.count()).select_from(Post)) or 0
@@ -24,7 +30,8 @@ async def clear_database(session_factory=async_session_maker) -> tuple[int, int]
         await session.execute(delete(User))
         await session.commit()
 
-    return user_count, post_count
+    deleted_images = (image_storage or PostImageStorage()).clear()
+    return user_count, post_count, deleted_images
 
 
 if __name__ == "__main__":
@@ -40,6 +47,8 @@ if __name__ == "__main__":
     if not args.yes:
         parser.error("Очистка отменена. Для подтверждения передайте --yes")
 
-    users, posts = asyncio.run(clear_database())
-    print(f"База очищена: удалено пользователей — {users}, постов — {posts}")
-
+    users, posts, images = asyncio.run(clear_database())
+    print(
+        "База очищена: "
+        f"удалено пользователей — {users}, постов — {posts}, изображений — {images}"
+    )

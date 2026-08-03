@@ -12,3 +12,4 @@ python-multipart==0.0.20
 email-validator==2.2.0
 sqladmin==0.21.0
 itsdangerous==2.2.0
+Pillow==12.3.0

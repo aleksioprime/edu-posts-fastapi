@@ -1,3 +1,5 @@
+"""Команда заполнения базы демонстрационными данными."""
+
 import argparse
 import asyncio
 import sys

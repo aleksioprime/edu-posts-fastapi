@@ -9,6 +9,7 @@
 - регистрация и OAuth2/JWT-авторизация;
 - профиль текущего пользователя;
 - публичный список и просмотр постов с пагинацией;
+- необязательное изображение поста с загрузкой JPEG, PNG или WebP;
 - создание постов после входа;
 - изменение и удаление только своих постов (суперпользователь может управлять всеми);
 - административная панель `/admin`;
@@ -37,8 +38,8 @@ docker compose -p edu-posts exec api python scripts/create_superuser.py admin ad
 
 ### Служебные скрипты базы данных
 
-Очистка удаляет всех пользователей и все посты, но сохраняет структуру таблиц и состояние
-миграций Alembic. Операция необратима и требует явного флага `--yes`:
+Очистка удаляет всех пользователей, все посты и их изображения, но сохраняет структуру
+таблиц и состояние миграций Alembic. Операция необратима и требует явного флага `--yes`:
 
 ```bash
 docker compose -p edu-posts exec api python scripts/clear_database.py --yes
@@ -89,9 +90,27 @@ pytest
 | POST | `/api/v1/posts` | зарегистрированный пользователь |
 | PATCH | `/api/v1/posts/{id}` | автор поста |
 | DELETE | `/api/v1/posts/{id}` | автор поста |
+| PUT | `/api/v1/posts/{id}/image` | загрузка изображения автором |
+| DELETE | `/api/v1/posts/{id}/image` | удаление изображения автором |
 
 Для защищённых запросов передавайте заголовок `Authorization: Bearer <token>` либо
 используйте кнопку **Authorize** в Swagger UI.
+
+Изображение загружается как `multipart/form-data` в поле `image`. Поддерживаются JPEG,
+PNG и WebP размером до 5 МБ и не более 4096 пикселей по каждой стороне. Сервер проверяет
+содержимое, преобразует файл в WebP и возвращает относительный `image_url`. Файлы доступны
+публично по `/media/posts/...` и сохраняются в Docker volume `edu-posts_media_data`.
+
+Пример загрузки после создания поста:
+
+```bash
+curl -X PUT "https://posts.aledev.ru/api/v1/posts/POST_ID/image" \
+  -H "Authorization: Bearer ACCESS_TOKEN" \
+  -F "image=@./cover.png"
+```
+
+Отдельный `location` для `/media` в Nginx не требуется: общий reverse proxy на
+`127.0.0.1:8000` передаёт запросы к изображениям в FastAPI.
 
 ## Production deployment
 
@@ -252,6 +271,6 @@ docker compose -p edu-posts -f docker-compose.prod.yml exec api \
   --password 'replace-with-demo-password'
 ```
 
-Данные PostgreSQL сохраняются в named volume `edu-posts_postgres_data` и не удаляются при
-обычном обновлении контейнеров. Для production необходимо отдельно настроить резервное
-копирование этого volume или самой базы данных.
+Данные PostgreSQL сохраняются в named volume `edu-posts_postgres_data`, а изображения —
+в `edu-posts_media_data`. Оба volume сохраняются при обычном обновлении контейнеров. Для
+production необходимо отдельно настроить резервное копирование базы данных и media volume.

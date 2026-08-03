@@ -1,3 +1,5 @@
+"""Сценарии регистрации и авторизации пользователей."""
+
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 
@@ -9,10 +11,14 @@ from src.schemas.user import UserCreate
 
 
 class AuthService:
+    """Регистрирует пользователей и выдаёт токены доступа."""
+
     def __init__(self, uow: UnitOfWork):
         self.uow = uow
 
     async def register(self, data: UserCreate) -> User:
+        """Создаёт пользователя с уникальными логином и email."""
+
         user = User(username=data.username, email=str(data.email).lower(), hashed_password="")
         user.set_password(data.password)
         try:
@@ -24,6 +30,8 @@ class AuthService:
         return user
 
     async def login(self, login: str, password: str) -> Token:
+        """Проверяет учётные данные и возвращает токен доступа."""
+
         user = await self.uow.users.get_by_login(login)
         if user is None or not user.is_active or not user.check_password(password):
             raise HTTPException(
@@ -32,4 +40,3 @@ class AuthService:
                 headers={"WWW-Authenticate": "Bearer"},
             )
         return Token(access_token=create_access_token(user.id))
-

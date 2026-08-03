@@ -1,3 +1,5 @@
+"""Создание JWT-токенов и определение текущего пользователя."""
+
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -15,6 +17,8 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
 def create_access_token(user_id: UUID) -> str:
+    """Создаёт JWT-токен доступа для пользователя."""
+
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
@@ -26,6 +30,8 @@ def create_access_token(user_id: UUID) -> str:
 
 
 def decode_access_token(token: str) -> UUID:
+    """Проверяет JWT-токен и извлекает идентификатор пользователя."""
+
     credentials_error = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Недействительный или просроченный токен",
@@ -48,10 +54,11 @@ async def get_current_user(
     token: str = Depends(oauth2_scheme),
     session: AsyncSession = Depends(get_session),
 ):
+    """Возвращает активного пользователя по Bearer-токену."""
+
     from src.repositories.users import UserRepository
 
     user = await UserRepository(session).get_by_id(decode_access_token(token))
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="Пользователь не найден или отключён")
     return user
-

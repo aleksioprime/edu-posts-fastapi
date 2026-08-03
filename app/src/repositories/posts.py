@@ -1,3 +1,5 @@
+"""Запросы к таблице постов."""
+
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -8,10 +10,14 @@ from src.models.post import Post
 
 
 class PostRepository:
+    """Инкапсулирует операции чтения и записи постов."""
+
     def __init__(self, session: AsyncSession):
         self.session = session
 
     async def get_all(self, limit: int, offset: int) -> tuple[list[Post], int]:
+        """Возвращает страницу постов и их общее количество."""
+
         query = (
             select(Post)
             .options(selectinload(Post.author))
@@ -24,15 +30,20 @@ class PostRepository:
         return posts, total or 0
 
     async def get_by_id(self, post_id: UUID) -> Post | None:
+        """Находит пост по идентификатору вместе с автором."""
+
         query = select(Post).options(selectinload(Post.author)).where(Post.id == post_id)
         return (await self.session.scalars(query)).one_or_none()
 
     async def create(self, post: Post) -> Post:
+        """Добавляет новый пост в текущую сессию."""
+
         self.session.add(post)
         await self.session.flush()
         await self.session.refresh(post, attribute_names=["author"])
         return post
 
     async def delete(self, post: Post) -> None:
-        await self.session.delete(post)
+        """Помечает пост для удаления в текущей сессии."""
 
+        await self.session.delete(post)

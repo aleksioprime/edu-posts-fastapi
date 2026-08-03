@@ -1,3 +1,5 @@
+"""Проверка доступа суперпользователей к административной панели."""
+
 from uuid import UUID
 
 from sqlalchemy import or_, select
@@ -9,7 +11,11 @@ from src.models.user import User
 
 
 class AdminAuth(AuthenticationBackend):
+    """Управляет сессией аутентификации администратора."""
+
     async def login(self, request: Request) -> bool:
+        """Проверяет учётные данные и открывает административную сессию."""
+
         form = await request.form()
         login = str(form.get("username", "")).strip()
         password = str(form.get("password", ""))
@@ -23,10 +29,14 @@ class AdminAuth(AuthenticationBackend):
         return True
 
     async def logout(self, request: Request) -> bool:
+        """Завершает административную сессию."""
+
         request.session.clear()
         return True
 
     async def authenticate(self, request: Request) -> bool:
+        """Проверяет активного суперпользователя в текущей сессии."""
+
         user_id = request.session.get("admin_user_id")
         if not user_id:
             return False

@@ -1,3 +1,5 @@
+"""Загрузка настроек приложения."""
+
 from functools import lru_cache
 
 from pydantic import Field
@@ -5,6 +7,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """Настройки приложения, получаемые из переменных окружения и файла .env."""
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     project_name: str = "Edu Posts API"
@@ -21,13 +25,16 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> list[str]:
+        """Возвращает разрешённые источники CORS в виде списка."""
+
         return [value.strip() for value in self.cors_origins.split(",") if value.strip()]
 
 
 @lru_cache
 def get_settings() -> Settings:
+    """Создаёт и кеширует настройки приложения."""
+
     return Settings()
 
 
 settings = get_settings()
-

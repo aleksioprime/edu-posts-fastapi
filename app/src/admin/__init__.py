@@ -1,3 +1,5 @@
+"""Подключение административной панели к приложению."""
+
 from fastapi import FastAPI
 from sqladmin import Admin
 
@@ -8,6 +10,8 @@ from src.core.database import async_session_maker
 
 
 def setup_admin(app: FastAPI) -> Admin:
+    """Настраивает SQLAdmin и регистрирует административные представления."""
+
     admin = Admin(
         app,
         session_maker=async_session_maker,

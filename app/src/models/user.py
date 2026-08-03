@@ -1,3 +1,5 @@
+"""ORM-модель пользователя."""
+
 import uuid
 from datetime import datetime
 
@@ -9,6 +11,8 @@ from src.core.database import Base
 
 
 class User(Base):
+    """Пользователь приложения и автор постов."""
+
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -22,9 +26,13 @@ class User(Base):
     posts: Mapped[list["Post"]] = relationship(back_populates="author", cascade="all, delete-orphan")
 
     def set_password(self, password: str) -> None:
+        """Хеширует и сохраняет пароль пользователя."""
+
         self.hashed_password = generate_password_hash(password)
 
     def check_password(self, password: str) -> bool:
+        """Проверяет пароль по сохранённому хешу."""
+
         return check_password_hash(self.hashed_password, password)
 
     def __str__(self) -> str:
@@ -32,4 +40,3 @@ class User(Base):
 
 
 from src.models.post import Post  # noqa: E402
-

@@ -40,6 +40,8 @@ pip-wheel-metadata/
 *.sqlite
 *.sqlite3
 postgres_data/
+media/
+.media/
 
 # Logs and temporary files
 *.log

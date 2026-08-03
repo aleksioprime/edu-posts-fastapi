@@ -27,9 +27,8 @@ async def test_seed_is_idempotent_and_clear_removes_data(test_session_maker):
         assert await session.scalar(select(func.count()).select_from(User)) == 2
         assert await session.scalar(select(func.count()).select_from(Post)) == 4
 
-    assert await clear_database(session_factory=test_session_maker) == (2, 4)
+    assert await clear_database(session_factory=test_session_maker) == (2, 4, 0)
 
     async with test_session_maker() as session:
         assert await session.scalar(select(func.count()).select_from(User)) == 0
         assert await session.scalar(select(func.count()).select_from(Post)) == 0
-
