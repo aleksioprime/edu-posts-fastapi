@@ -2,18 +2,115 @@
 
 import argparse
 import asyncio
+import json
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
+from urllib.parse import quote
+from urllib.request import Request, urlopen
+from uuid import UUID
 
 project_root = Path(__file__).resolve().parents[1]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+from fastapi import UploadFile
 from sqlalchemy import or_, select
 
 from src.core.database import async_session_maker
 from src.models.post import Post
 from src.models.user import User
+from src.services.image_storage import POST_IMAGE_MAX_BYTES, PostImageStorage
+
+
+PICSUM_IMAGE_URL = "https://picsum.photos/seed/{seed}/1200/800"
+JSONPLACEHOLDER_POSTS_URL = "https://jsonplaceholder.typicode.com/posts"
+EXTERNAL_REQUEST_TIMEOUT = 15
+TEXT_DOWNLOAD_MAX_BYTES = 1024 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class PostTemplate:
+    """Заголовок и содержимое тестового поста."""
+
+    title: str
+    content: str
+
+
+def download_random_image(seed: str) -> bytes:
+    """Загружает воспроизводимое случайное изображение из Lorem Picsum."""
+
+    url = PICSUM_IMAGE_URL.format(seed=quote(seed, safe=""))
+    request = Request(url, headers={"User-Agent": "edu-posts-seed/1.0"})
+    try:
+        with urlopen(request, timeout=EXTERNAL_REQUEST_TIMEOUT) as response:
+            content = response.read(POST_IMAGE_MAX_BYTES + 1)
+    except OSError as exc:
+        raise RuntimeError(f"Не удалось загрузить тестовое изображение: {url}") from exc
+
+    if len(content) > POST_IMAGE_MAX_BYTES:
+        raise RuntimeError("Тестовое изображение превышает допустимые 5 МБ")
+    if not content:
+        raise RuntimeError("Сервис изображений вернул пустой ответ")
+    return content
+
+
+def download_post_templates() -> list[PostTemplate]:
+    """Загружает шаблоны постов из JSONPlaceholder одним запросом."""
+
+    request = Request(
+        JSONPLACEHOLDER_POSTS_URL,
+        headers={"User-Agent": "edu-posts-seed/1.0"},
+    )
+    try:
+        with urlopen(request, timeout=EXTERNAL_REQUEST_TIMEOUT) as response:
+            content = response.read(TEXT_DOWNLOAD_MAX_BYTES + 1)
+    except OSError as exc:
+        raise RuntimeError("Не удалось загрузить тексты из JSONPlaceholder") from exc
+
+    if len(content) > TEXT_DOWNLOAD_MAX_BYTES:
+        raise RuntimeError("Ответ JSONPlaceholder превышает допустимый 1 МБ")
+
+    try:
+        payload = json.loads(content)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise RuntimeError("JSONPlaceholder вернул некорректный JSON") from exc
+
+    if not isinstance(payload, list):
+        raise RuntimeError("JSONPlaceholder вернул неожиданный формат данных")
+
+    templates = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        title = item.get("title")
+        body = item.get("body")
+        if isinstance(title, str) and title.strip() and isinstance(body, str) and body.strip():
+            normalized_title = title.strip()
+            templates.append(
+                PostTemplate(
+                    title=(normalized_title[:1].upper() + normalized_title[1:])[:200],
+                    content=body.strip(),
+                )
+            )
+
+    if not templates:
+        raise RuntimeError("JSONPlaceholder не вернул подходящих текстов")
+    return templates
+
+
+def make_local_template(user_number: int, post_number: int, username: str) -> PostTemplate:
+    """Создаёт локальный текст поста без обращения к внешнему API."""
+
+    return PostTemplate(
+        title=f"Тестовый пост {user_number}.{post_number}",
+        content=(
+            f"Тестовая публикация №{post_number} пользователя {username}. "
+            "Эти данные созданы скриптом seed_database.py."
+        ),
+    )
 
 
 async def seed_database(
@@ -21,55 +118,96 @@ async def seed_database(
     posts_per_user: int,
     password: str,
     session_factory=async_session_maker,
+    image_storage: PostImageStorage | None = None,
+    image_loader: Callable[[str], bytes] = download_random_image,
+    text_loader: Callable[[], list[PostTemplate]] = download_post_templates,
+    add_images: bool = True,
+    use_remote_text: bool = True,
 ) -> tuple[int, int]:
-    """Идемпотентно создаёт demo-пользователей и их публикации."""
+    """Идемпотентно создаёт demo-пользователей, посты и изображения."""
+
     created_users = 0
     created_posts = 0
+    created_image_ids: list[UUID] = []
+    storage = image_storage
+    if add_images and storage is None:
+        storage = PostImageStorage()
+    templates = (
+        await asyncio.to_thread(text_loader)
+        if use_remote_text and users_count > 0 and posts_per_user > 0
+        else []
+    )
 
-    async with session_factory() as session:
-        for user_number in range(1, users_count + 1):
-            username = f"demo{user_number}"
-            email = f"demo{user_number}@example.com"
-            user = await session.scalar(
-                select(User).where(or_(User.username == username, User.email == email))
-            )
-
-            if user is None:
-                user = User(username=username, email=email, hashed_password="")
-                user.set_password(password)
-                session.add(user)
-                await session.flush()
-                created_users += 1
-            elif user.username != username or user.email != email:
-                raise RuntimeError(
-                    f"Нельзя создать {username}: его логин или email занят другим пользователем"
+    try:
+        async with session_factory() as session:
+            for user_number in range(1, users_count + 1):
+                username = f"demo{user_number}"
+                email = f"demo{user_number}@example.com"
+                user = await session.scalar(
+                    select(User).where(or_(User.username == username, User.email == email))
                 )
-            else:
-                # Повторный запуск оставляет данные идемпотентными, но синхронизирует
-                # переданный demo-пароль, чтобы напечатанные реквизиты всегда работали.
-                user.set_password(password)
 
-            for post_number in range(1, posts_per_user + 1):
-                title = f"Тестовый пост {user_number}.{post_number}"
-                exists = await session.scalar(
-                    select(Post.id).where(Post.author_id == user.id, Post.title == title)
-                )
-                if exists is not None:
-                    continue
+                if user is None:
+                    user = User(username=username, email=email, hashed_password="")
+                    user.set_password(password)
+                    session.add(user)
+                    await session.flush()
+                    created_users += 1
+                elif user.username != username or user.email != email:
+                    raise RuntimeError(
+                        f"Нельзя создать {username}: его логин или email занят другим пользователем"
+                    )
+                else:
+                    # Повторный запуск оставляет данные идемпотентными, но синхронизирует
+                    # переданный demo-пароль, чтобы напечатанные реквизиты всегда работали.
+                    user.set_password(password)
 
-                session.add(
-                    Post(
-                        title=title,
-                        content=(
-                            f"Тестовая публикация №{post_number} пользователя {username}. "
-                            "Эти данные созданы скриптом seed_database.py."
-                        ),
+                for post_number in range(1, posts_per_user + 1):
+                    if templates:
+                        # Индекс не зависит от числа постов в запуске, поэтому повторный
+                        # seed с другим --posts-per-user остаётся идемпотентным.
+                        template_index = ((user_number - 1) * 50 + post_number - 1) % len(
+                            templates
+                        )
+                        template = templates[template_index]
+                    else:
+                        template = make_local_template(user_number, post_number, username)
+
+                    exists = await session.scalar(
+                        select(Post.id).where(
+                            Post.author_id == user.id,
+                            Post.title == template.title,
+                        )
+                    )
+                    if exists is not None:
+                        continue
+
+                    post = Post(
+                        title=template.title,
+                        content=template.content,
                         author_id=user.id,
                     )
-                )
-                created_posts += 1
+                    session.add(post)
+                    await session.flush()
 
-        await session.commit()
+                    if add_images and storage is not None:
+                        content = await asyncio.to_thread(image_loader, str(post.id))
+                        upload = UploadFile(file=BytesIO(content), filename=f"{post.id}.jpg")
+                        try:
+                            post.image_url = await storage.save(post.id, upload)
+                        finally:
+                            await upload.close()
+                        created_image_ids.append(post.id)
+
+                    created_posts += 1
+
+            await session.commit()
+    except Exception:
+        # Файлы не участвуют в транзакции БД, поэтому удаляем их при любом сбое.
+        if storage is not None:
+            for post_id in created_image_ids:
+                storage.delete(post_id)
+        raise
 
     return created_users, created_posts
 
@@ -84,6 +222,16 @@ if __name__ == "__main__":
         help="Количество постов каждого пользователя.",
     )
     parser.add_argument("--password", required=True, help="Общий пароль demo-пользователей.")
+    parser.add_argument(
+        "--without-images",
+        action="store_true",
+        help="Создать посты без загрузки изображений из Lorem Picsum.",
+    )
+    parser.add_argument(
+        "--local-text",
+        action="store_true",
+        help="Создать русские тестовые тексты без обращения к JSONPlaceholder.",
+    )
     args = parser.parse_args()
 
     if not 1 <= args.users <= 20:
@@ -94,7 +242,13 @@ if __name__ == "__main__":
         parser.error("--password должен содержать не менее 8 символов")
 
     users, posts = asyncio.run(
-        seed_database(args.users, args.posts_per_user, args.password)
+        seed_database(
+            args.users,
+            args.posts_per_user,
+            args.password,
+            add_images=not args.without_images,
+            use_remote_text=not args.local_text,
+        )
     )
     print(f"Тестовые данные готовы: создано пользователей — {users}, постов — {posts}")
     print(f"Логины: demo1 … demo{args.users}; общий пароль передан через --password")

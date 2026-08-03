@@ -45,14 +45,31 @@ docker compose -p edu-posts exec api python scripts/create_superuser.py admin ad
 docker compose -p edu-posts exec api python scripts/clear_database.py --yes
 ```
 
-Заполнение создаёт пользователей `demo1`, `demo2`, … и тестовые посты. Повторный запуск
-не дублирует уже созданные записи:
+Заполнение создаёт пользователей `demo1`, `demo2`, … и тестовые посты. Заголовки и
+содержимое загружаются одним запросом из
+[JSONPlaceholder](https://jsonplaceholder.typicode.com/guide/), а для каждого нового поста
+скрипт получает отдельное изображение из [Lorem Picsum](https://picsum.photos/). Повторный
+запуск не дублирует уже созданные записи:
 
 ```bash
 docker compose -p edu-posts exec api python scripts/seed_database.py \
   --users 3 \
   --posts-per-user 3 \
   --password 'replace-with-demo-password'
+```
+
+Серверу требуется исходящий HTTPS-доступ к `jsonplaceholder.typicode.com` и
+`picsum.photos`. Флаг `--without-images` отключает загрузку изображений, а `--local-text`
+возвращает встроенные русские заголовки и содержимое. Для полностью автономного запуска
+передайте оба флага:
+
+```bash
+docker compose -p edu-posts exec api python scripts/seed_database.py \
+  --users 3 \
+  --posts-per-user 3 \
+  --password 'replace-with-demo-password' \
+  --without-images \
+  --local-text
 ```
 
 После очистки суперпользователь также удаляется, поэтому при необходимости создайте его
