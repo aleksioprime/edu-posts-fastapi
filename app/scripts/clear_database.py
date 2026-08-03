@@ -21,13 +21,16 @@ async def clear_database(
     session_factory=async_session_maker,
     image_storage: PostImageStorage | None = None,
 ) -> tuple[int, int, int]:
-    """Удаляет прикладные данные, сохраняя таблицы и версию Alembic."""
+    """Удаляет посты и обычных пользователей, сохраняя суперпользователей."""
+
     async with session_factory() as session:
         post_count = await session.scalar(select(func.count()).select_from(Post)) or 0
-        user_count = await session.scalar(select(func.count()).select_from(User)) or 0
+        user_count = await session.scalar(
+            select(func.count()).select_from(User).where(User.is_superuser.is_(False))
+        ) or 0
 
         await session.execute(delete(Post))
-        await session.execute(delete(User))
+        await session.execute(delete(User).where(User.is_superuser.is_(False)))
         await session.commit()
 
     deleted_images = (image_storage or PostImageStorage()).clear()
@@ -36,7 +39,10 @@ async def clear_database(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Удаляет всех пользователей и посты, не меняя структуру базы данных."
+        description=(
+            "Удаляет посты и обычных пользователей, сохраняя суперпользователей "
+            "и структуру базы данных."
+        )
     )
     parser.add_argument(
         "--yes",
@@ -50,5 +56,6 @@ if __name__ == "__main__":
     users, posts, images = asyncio.run(clear_database())
     print(
         "База очищена: "
-        f"удалено пользователей — {users}, постов — {posts}, изображений — {images}"
+        f"удалено обычных пользователей — {users}, постов — {posts}, "
+        f"изображений — {images}; суперпользователи сохранены"
     )

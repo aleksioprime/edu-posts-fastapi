@@ -13,3 +13,4 @@ email-validator==2.2.0
 sqladmin==0.21.0
 itsdangerous==2.2.0
 Pillow==12.3.0
+Faker==40.36.0
