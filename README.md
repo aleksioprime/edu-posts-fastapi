@@ -111,6 +111,7 @@ pytest
 | POST | `/api/v1/auth/login` | любой; form-data `username`, `password` |
 | GET | `/api/v1/users/me` | по Bearer-токену |
 | GET | `/api/v1/posts` | публичный |
+| GET | `/api/v1/posts/mine` | зарегистрированный пользователь; только свои посты |
 | GET | `/api/v1/posts/{id}` | публичный |
 | POST | `/api/v1/posts` | зарегистрированный пользователь |
 | PATCH | `/api/v1/posts/{id}` | автор поста |

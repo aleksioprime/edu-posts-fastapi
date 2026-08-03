@@ -31,6 +31,38 @@ async def test_posts_are_public_but_creation_requires_auth(client, auth_headers)
     assert response.json()["author"]["username"] == "author"
 
 
+async def test_current_user_gets_only_own_posts(client, auth_headers):
+    await client.post(
+        "/api/v1/posts",
+        json={"title": "Пост автора", "content": "Текст"},
+        headers=auth_headers,
+    )
+
+    await client.post(
+        "/api/v1/auth/register",
+        json={"username": "reader", "email": "reader@example.com", "password": "secure-password"},
+    )
+    login = await client.post(
+        "/api/v1/auth/login",
+        data={"username": "reader", "password": "secure-password"},
+    )
+    reader_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    await client.post(
+        "/api/v1/posts",
+        json={"title": "Пост читателя", "content": "Текст"},
+        headers=reader_headers,
+    )
+
+    unauthorized = await client.get("/api/v1/posts/mine")
+    assert unauthorized.status_code == 401
+
+    response = await client.get("/api/v1/posts/mine", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["title"] == "Пост автора"
+    assert response.json()["items"][0]["author"]["username"] == "author"
+
+
 async def test_owner_can_upload_serve_and_delete_image(client, auth_headers):
     post = await client.post(
         "/api/v1/posts",

@@ -15,18 +15,24 @@ class PostRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_all(self, limit: int, offset: int) -> tuple[list[Post], int]:
+    async def get_all(
+        self,
+        limit: int,
+        offset: int,
+        author_id: UUID | None = None,
+    ) -> tuple[list[Post], int]:
         """Возвращает страницу постов и их общее количество."""
 
-        query = (
-            select(Post)
-            .options(selectinload(Post.author))
-            .order_by(Post.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
+        query = select(Post).options(selectinload(Post.author))
+        count_query = select(func.count()).select_from(Post)
+
+        if author_id is not None:
+            query = query.where(Post.author_id == author_id)
+            count_query = count_query.where(Post.author_id == author_id)
+
+        query = query.order_by(Post.created_at.desc()).limit(limit).offset(offset)
         posts = list((await self.session.scalars(query)).all())
-        total = await self.session.scalar(select(func.count()).select_from(Post))
+        total = await self.session.scalar(count_query)
         return posts, total or 0
 
     async def get_by_id(self, post_id: UUID) -> Post | None:

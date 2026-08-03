@@ -18,10 +18,15 @@ class PostService:
         self.uow = uow
         self.image_storage = image_storage
 
-    async def get_all(self, limit: int, offset: int) -> PostList:
+    async def get_all(
+        self,
+        limit: int,
+        offset: int,
+        author_id: UUID | None = None,
+    ) -> PostList:
         """Возвращает страницу публичных постов."""
 
-        posts, total = await self.uow.posts.get_all(limit, offset)
+        posts, total = await self.uow.posts.get_all(limit, offset, author_id)
         return PostList(items=[PostRead.model_validate(post) for post in posts], total=total, limit=limit, offset=offset)
 
     async def get_by_id(self, post_id: UUID) -> Post:

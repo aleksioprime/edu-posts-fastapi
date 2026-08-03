@@ -25,6 +25,18 @@ async def list_posts(
     return await service.get_all(limit, offset)
 
 
+@router.get("/mine", response_model=PostList)
+async def list_my_posts(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    user: User = Depends(get_current_user),
+    service: PostService = Depends(get_post_service),
+):
+    """Возвращает посты текущего пользователя с пагинацией."""
+
+    return await service.get_all(limit, offset, author_id=user.id)
+
+
 @router.get("/{post_id}", response_model=PostRead)
 async def get_post(post_id: UUID, service: PostService = Depends(get_post_service)):
     """Возвращает один публичный пост."""
